@@ -1,0 +1,270 @@
+version: '3.8'
+
+services:
+  # Redis for service discovery and caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # MongoDB (if not using external service)
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password123}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # API Gateway (Load Balancer)
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_HOST=redis
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - SERVICE_TYPE=gateway
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Data Ingestion Service (Scalable)
+  data-ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=data_ingestion
+      - SERVICE_PORT=8001
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Analytics Service (Scalable)
+  analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=analytics
+      - SERVICE_PORT=8002
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Real-time Streaming Service
+  realtime-streaming:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=realtime_streaming
+      - SERVICE_PORT=8005
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 1  # WebSocket services typically run single instance per node
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Advanced ML Service
+  advanced-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=advanced_ml
+      - SERVICE_PORT=8006
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 1  # ML services are resource intensive
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Security Service
+  security:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=security
+      - SERVICE_PORT=8007
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-super-secret-jwt-key}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-32-char-encryption-key!!}
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Monitoring Service
+  monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    ports:
+      - "8008:8008"  # Expose for Prometheus scraping
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=monitoring
+      - SERVICE_PORT=8008
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Query Processor Service
+  query-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    environment:
+      - ENVIRONMENT=production
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/ems?authSource=admin
+      - MONGODB_DATABASE=ems
+      - REDIS_HOST=redis
+      - SERVICE_TYPE=query_processor
+      - SERVICE_PORT=8003
+    depends_on:
+      - redis
+      - mongodb
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  mongodb_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
