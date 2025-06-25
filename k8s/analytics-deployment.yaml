@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ems-analytics
+  labels:
+    app: ems-analytics
+    component: analytics
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ems-analytics
+  template:
+    metadata:
+      labels:
+        app: ems-analytics
+        component: analytics
+    spec:
+      containers:
+      - name: analytics
+        image: ems-agent/service:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: SERVICE_TYPE
+          value: "analytics"
+        - name: SERVICE_PORT
+          value: "8002"
+        - name: MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: ems-secrets
+              key: mongodb-uri
+        - name: REDIS_HOST
+          value: "redis-service"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ems-analytics-service
+  labels:
+    app: ems-analytics
+spec:
+  selector:
+    app: ems-analytics
+  ports:
+  - port: 8002
+    targetPort: 8002
+    protocol: TCP
+  type: ClusterIP

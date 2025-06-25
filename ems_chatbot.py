@@ -9,6 +9,8 @@ import asyncio
 import json
 import logging
 import time
+import os
+import requests
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import re
@@ -704,12 +706,200 @@ class EMSChatbotAI:
         }
 
 
+class GeminiAI:
+    """Gemini AI integration for general questions"""
+    
+    def __init__(self):
+        self.api_key = os.getenv('GEMINI_API_KEY', 'AIzaSyAqib60Hqzz36ygA5cv4QRl8y6CKO9spLs')
+        self.model_name = 'gemini-1.5-flash'
+        
+    async def get_gemini_response(self, user_input: str) -> str:
+        """Get response from Gemini API for general questions"""
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+            
+            headers = {
+                'Content-Type': 'application/json',
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"You are a helpful, knowledgeable, and friendly AI assistant. Provide detailed, informative, and engaging responses. Be thorough in your explanations while remaining conversational and easy to understand. Note: If the question is about energy management, power systems, electrical monitoring, or similar technical topics, mention that you can provide general information but suggest the user ask the EMS specialist for detailed technical analysis. User question: {user_input}"
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 800,
+                    "topP": 0.8,
+                    "topK": 40
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    return f"🤖 **General AI Response:**\n\n{text.strip()}\n\n💡 *For detailed energy system analysis, feel free to ask about power consumption, anomalies, costs, or system status!*"
+                else:
+                    return "🤖 I received an empty response. Please try again."
+            else:
+                logger.warning(f"Gemini API error: {response.status_code}")
+                return "🤖 I'm having trouble connecting to my general knowledge base right now. Let me help you with energy management questions instead! Try asking about power consumption, system status, or energy costs."
+        
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            return "🤖 I'm having trouble with general questions right now, but I'm excellent at energy management! Ask me about power consumption, anomalies, energy costs, or system analysis."
+
+
+class HybridChatbotRouter:
+    """Hybrid router that decides between EMS specialist and general AI"""
+    
+    def __init__(self):
+        self.ems_ai = EMSChatbotAI()
+        self.general_ai = GeminiAI()
+        
+        # Keywords that indicate energy/EMS related questions
+        self.ems_keywords = [
+            # Energy terms
+            'energy', 'power', 'electricity', 'electrical', 'watt', 'kilowatt', 'kwh', 'consumption',
+            'usage', 'load', 'demand', 'grid', 'meter', 'reading', 'bill', 'cost', 'rate',
+            
+            # Electrical parameters
+            'voltage', 'current', 'ampere', 'amp', 'power factor', 'pf', 'frequency',
+            'phase', 'reactive', 'apparent', 'kva', 'kvar', 'thd',
+            
+            # System terms
+            'ems', 'system', 'status', 'health', 'operational', 'running', 'working',
+            'anomaly', 'anomalies', 'spike', 'fluctuation', 'abnormal', 'alert',
+            
+            # Analysis terms
+            'trend', 'pattern', 'analysis', 'report', 'summary', 'statistics',
+            'average', 'maximum', 'minimum', 'peak', 'efficiency', 'optimization',
+            
+            # Equipment terms
+            'equipment', 'device', 'sensor', 'hardware', 'monitor', 'monitoring',
+            'scada', 'plc', 'inverter', 'transformer', 'generator', 'motor',
+            
+            # Time-based terms in energy context
+            'today', 'daily', 'hourly', 'monthly', 'real-time', 'latest', 'current',
+            'historical', 'forecast', 'prediction'
+        ]
+        
+        # General terms that are NOT energy-related
+        self.general_keywords = [
+            'weather', 'news', 'sports', 'movie', 'music', 'recipe', 'cooking',
+            'travel', 'hotel', 'restaurant', 'joke', 'story', 'game', 'book',
+            'health', 'medicine', 'doctor', 'exercise', 'fitness', 'diet',
+            'fashion', 'shopping', 'car', 'transportation', 'politics',
+            'history', 'geography', 'science', 'math', 'programming', 'computer',
+            'phone', 'app', 'social media', 'facebook', 'twitter', 'instagram'
+        ]
+    
+    def is_energy_related(self, question: str) -> bool:
+        """Determine if question is energy/EMS related"""
+        question_lower = question.lower()
+        
+        # Strong indicators for EMS questions
+        ems_score = 0
+        general_score = 0
+        
+        # Count EMS-related keywords
+        for keyword in self.ems_keywords:
+            if keyword in question_lower:
+                ems_score += 1
+        
+        # Count general keywords
+        for keyword in self.general_keywords:
+            if keyword in question_lower:
+                general_score += 1
+        
+        # Special patterns that are definitely EMS-related
+        ems_patterns = [
+            r'(what.*consumption|how much.*energy|power.*usage)',
+            r'(system.*status|health.*check|operational)',
+            r'(anomal|spike|fluctuat|abnormal)',
+            r'(voltage|current|power factor)',
+            r'(energy.*cost|power.*bill|electricity.*rate)',
+            r'(ems|energy management|power monitor)',
+            r'(latest.*reading|current.*data|real.?time)'
+        ]
+        
+        for pattern in ems_patterns:
+            if re.search(pattern, question_lower):
+                ems_score += 3
+        
+        # If it's a greeting, it could go either way
+        greeting_patterns = [
+            r'^(hi|hello|hey|good morning|good afternoon|good evening)',
+            r'^(how are you|what\'s up|how\'s it going)'
+        ]
+        
+        for pattern in greeting_patterns:
+            if re.search(pattern, question_lower):
+                return True  # Let EMS handle greetings with energy context
+        
+        # Decision logic
+        if ems_score > general_score:
+            return True
+        elif general_score > ems_score and ems_score == 0:
+            return False
+        else:
+            # Default to EMS if unclear
+            return True
+    
+    async def route_question(self, question: str) -> Dict[str, Any]:
+        """Route question to appropriate AI and return response"""
+        start_time = time.time()
+        
+        is_ems = self.is_energy_related(question)
+        
+        logger.info(f"Question routing: {'EMS' if is_ems else 'General'} - '{question[:50]}...'")
+        
+        if is_ems:
+            # Use EMS specialist
+            try:
+                result = await self.ems_ai.process_chat_message(question)
+                result['ai_type'] = 'EMS_Specialist'
+                result['routing_decision'] = 'energy_related'
+                return result
+            except Exception as e:
+                logger.error(f"EMS AI error: {e}")
+                # Fallback to general AI if EMS fails
+                response = await self.general_ai.get_gemini_response(question)
+                return {
+                    'response': f"⚠️ EMS specialist temporarily unavailable. Here's a general response:\n\n{response}",
+                    'ai_type': 'General_Fallback',
+                    'routing_decision': 'ems_failed',
+                    'processing_time': time.time() - start_time
+                }
+        else:
+            # Use general AI
+            try:
+                response = await self.general_ai.get_gemini_response(question)
+                return {
+                    'response': response,
+                    'ai_type': 'General_AI',
+                    'routing_decision': 'general_question',
+                    'processing_time': time.time() - start_time
+                }
+            except Exception as e:
+                logger.error(f"General AI error: {e}")
+                # Fallback to EMS if general AI fails
+                result = await self.ems_ai.process_chat_message(question)
+                result['ai_type'] = 'EMS_Fallback'
+                result['routing_decision'] = 'general_failed'
+                return result
+        
+
 class EMSChatbotApp:
     """FastAPI application for EMS Chatbot"""
     
     def __init__(self):
         self.app = self._create_app()
-        self.chatbot = EMSChatbotAI()
+        self.chatbot = HybridChatbotRouter()  # Use hybrid router instead of just EMS
         self.active_connections = set()
     
     def _create_app(self) -> FastAPI:
@@ -752,12 +942,14 @@ class EMSChatbotApp:
             
             try:
                 # Send welcome message
-                welcome_response = await self.chatbot.process_chat_message("hello")
+                welcome_response = await self.chatbot.route_question("hello")
                 await websocket.send_json({
                     'type': 'bot_message',
                     'message': welcome_response['response'],
-                    'intent': welcome_response['intent'],
-                    'timestamp': welcome_response['timestamp']
+                    'intent': welcome_response.get('intent', 'greeting'),
+                    'ai_type': welcome_response.get('ai_type', 'EMS_Specialist'),
+                    'processing_time': welcome_response.get('processing_time', 0),
+                    'timestamp': datetime.now().isoformat()
                 })
                 
                 while True:
@@ -767,16 +959,16 @@ class EMSChatbotApp:
                     
                     if user_message.strip():
                         # Process the message
-                        response_data = await self.chatbot.process_chat_message(user_message)
+                        response_data = await self.chatbot.route_question(user_message)
                         
                         # Send response
                         await websocket.send_json({
                             'type': 'bot_message',
                             'message': response_data['response'],
-                            'intent': response_data['intent'],
-                            'confidence': response_data['confidence'],
-                            'processing_time': response_data['processing_time'],
-                            'timestamp': response_data['timestamp']
+                            'intent': response_data.get('intent', response_data.get('routing_decision', 'unknown')),
+                            'ai_type': response_data.get('ai_type', 'Unknown'),
+                            'processing_time': response_data.get('processing_time', 0),
+                            'timestamp': datetime.now().isoformat()
                         })
                     
             except WebSocketDisconnect:
@@ -1114,8 +1306,8 @@ class EMSChatbotApp:
             <div class="chat-container">
                 <div class="chat-header">
                     <div class="status-indicator" id="statusIndicator"></div>
-                    <h1>🔋 EMS Agent Assistant</h1>
-                    <p>Intelligent Energy Management System with MongoDB Analysis</p>
+                    <h1>🤖 EMS Agent + AI Assistant</h1>
+                    <p>Energy Management Specialist + General AI (Powered by Gemini)</p>
                 </div>
                 
                 <div class="chat-messages" id="chatMessages">
@@ -1125,7 +1317,7 @@ class EMSChatbotApp:
                         <div class="suggestion-chip" onclick="sendSuggestion('Show me any anomalies')">🚨 Check Anomalies</div>
                         <div class="suggestion-chip" onclick="sendSuggestion('What are the energy trends?')">📈 View Trends</div>
                         <div class="suggestion-chip" onclick="sendSuggestion('Generate a comprehensive report')">📋 Full Report</div>
-                        <div class="suggestion-chip" onclick="sendSuggestion('Analyze voltage quality')">⚡ Voltage Analysis</div>
+                        <div class="suggestion-chip" onclick="sendSuggestion('What is artificial intelligence?')">🧠 Ask AI Anything</div>
                     </div>
                     
                     <div class="typing-indicator" id="typingIndicator">
@@ -1183,10 +1375,10 @@ class EMSChatbotApp:
                         
                         if (data.type === 'bot_message') {
                             hideTypingIndicator();
-                            addBotMessage(data.message, data.intent, data.processing_time);
+                            addBotMessage(data.message, data.intent, data.processing_time, data.ai_type);
                         } else if (data.type === 'error') {
                             hideTypingIndicator();
-                            addBotMessage('❌ ' + data.message, 'error');
+                            addBotMessage('❌ ' + data.message, 'error', null, 'Error');
                         }
                     };
                     
@@ -1235,11 +1427,20 @@ class EMSChatbotApp:
                     scrollToBottom();
                 }
                 
-                function addBotMessage(message, intent, processingTime) {
+                function addBotMessage(message, intent, processingTime, aiType) {
                     const messageDiv = document.createElement('div');
                     messageDiv.className = 'message bot';
                     
                     const formattedMessage = formatBotMessage(message);
+                    
+                    // AI type badge
+                    let aiTypeBadge = '';
+                    if (aiType) {
+                        const badgeColor = aiType.includes('EMS') ? '#10b981' : aiType.includes('General') ? '#3b82f6' : '#6b7280';
+                        const badgeText = aiType.replace('_', ' ');
+                        aiTypeBadge = `<span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-right: 6px;">${badgeText}</span>`;
+                    }
+                    
                     const intentBadge = intent ? `<span style="background: #e5e7eb; padding: 2px 8px; border-radius: 12px; font-size: 11px; color: #6b7280; margin-right: 8px;">${intent}</span>` : '';
                     const timingInfo = processingTime ? ` • ${processingTime.toFixed(2)}s` : '';
                     
@@ -1248,7 +1449,7 @@ class EMSChatbotApp:
                         <div class="message-content">
                             ${formattedMessage}
                             <div class="message-meta">
-                                ${intentBadge}${getCurrentTime()}${timingInfo}
+                                ${aiTypeBadge}${intentBadge}${getCurrentTime()}${timingInfo}
                             </div>
                         </div>
                     `;

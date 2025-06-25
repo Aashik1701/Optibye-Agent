@@ -273,7 +273,7 @@ Use natural language queries:
 - **Machine Learning Models**: Train custom models for your data
 - **Integration APIs**: Connect with other energy management systems
 - **Real-time Streaming**: Set up live data feeds
-- **Mobile Access**: Configure mobile-friendly interfaces
+- **Web Access**: Configure web dashboard interfaces
 
 ## Troubleshooting
 

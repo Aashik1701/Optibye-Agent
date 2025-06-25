@@ -123,7 +123,7 @@ Includes:
 - Log aggregation setup
 
 ### [10_mobile_integration/](10_mobile_integration/)
-**Mobile application integration**
+**Web interface integration**
 
 Shows how to:
 - Build mobile APIs

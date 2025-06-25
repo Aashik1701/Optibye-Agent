@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import sys
+import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 import requests
@@ -149,10 +150,11 @@ else:
     # Global variables for EMS components
     query_engine = None
     data_loader = None
+    hybrid_router = None
 
     def initialize_ems():
         """Initialize EMS components (legacy mode)"""
-        global query_engine, data_loader
+        global query_engine, data_loader, hybrid_router
         
         try:
             logger.info("Initializing EMS Query Engine...")
@@ -160,6 +162,9 @@ else:
             
             logger.info("Initializing EMS Data Loader...")
             data_loader = EMSDataLoader()
+            
+            logger.info("Initializing Hybrid AI Router...")
+            hybrid_router = HybridQueryRouter()
             
             logger.info("EMS components initialized successfully!")
             return True
@@ -177,7 +182,7 @@ else:
 
     @app.route('/api/query', methods=['POST'])
     def process_query():
-        """Process user queries about energy data"""
+        """Process user queries using hybrid AI routing"""
         try:
             data = request.get_json()
             user_query = data.get('query', '').strip()
@@ -188,37 +193,43 @@ else:
                     'error': 'No query provided'
                 }), 400
             
-            logger.info(f"Processing query: {user_query}")
+            logger.info(f"Processing hybrid query: {user_query}")
             
-            # Process the query using the EMS search engine
-            if query_engine:
-                response = query_engine.process_query(user_query)
+            # Use hybrid router to process the query
+            if hybrid_router:
+                response_data = hybrid_router.route_question(user_query, query_engine)
                 
-                # Integrate with analytics and ML services for enhanced processing
+                # Integrate with analytics and ML services for enhanced processing (if available)
                 analytics_result = service_integrator.get_analytics('query_analysis', {'query': user_query})
                 ml_prediction = service_integrator.get_ml_prediction({'query': user_query})
                 anomalies = service_integrator.get_anomalies()
+                
+                return jsonify({
+                    'success': response_data['success'],
+                    'query': user_query,
+                    'response': response_data['response'],
+                    'ai_type': response_data['ai_type'],
+                    'routing_decision': response_data['routing_decision'],
+                    'processing_time': response_data['processing_time'],
+                    'analytics': analytics_result,
+                    'ml_prediction': ml_prediction,
+                    'anomalies': anomalies,
+                    'timestamp': response_data['timestamp']
+                })
             else:
-                response = "EMS system not initialized. Please try again later."
-                analytics_result = None
-                ml_prediction = None
-                anomalies = None
-            
-            return jsonify({
-                'success': True,
-                'query': user_query,
-                'response': response,
-                'analytics': analytics_result,
-                'ml_prediction': ml_prediction,
-                'anomalies': anomalies,
-                'timestamp': datetime.now().isoformat()
-            })
+                return jsonify({
+                    'success': False,
+                    'error': 'Hybrid AI router not initialized. Please try again later.',
+                    'query': user_query,
+                    'timestamp': datetime.now().isoformat()
+                }), 500
             
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            logger.error(f"Error processing hybrid query: {e}")
             return jsonify({
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
             }), 500
 
     @app.route('/api/status')
@@ -233,15 +244,22 @@ else:
             
             return jsonify({
                 'status': 'online',
-                'system': 'EMS Agent (Legacy Mode)',
+                'system': 'EMS Agent (Hybrid AI Mode)',
                 'database': MONGODB_DATABASE,
                 'timestamp': datetime.now().isoformat(),
                 'components': {
                     'query_engine': query_engine is not None,
-                    'data_loader': data_loader is not None
+                    'data_loader': data_loader is not None,
+                    'hybrid_router': hybrid_router is not None,
+                    'gemini_ai': hybrid_router is not None and hybrid_router.gemini_ai is not None
+                },
+                'ai_capabilities': {
+                    'energy_specialist': True,
+                    'general_ai': True,
+                    'hybrid_routing': hybrid_router is not None
                 },
                 'database_stats': db_stats,
-                'mode': 'monolithic'
+                'mode': 'hybrid_ai'
             })
             
         except Exception as e:
@@ -312,8 +330,9 @@ else:
         return jsonify({
             'status': 'healthy',
             'timestamp': datetime.now().isoformat(),
-            'service': 'EMS Agent (Legacy Mode)',
-            'mode': 'monolithic'
+            'service': 'EMS Agent (Hybrid AI Mode)',
+            'mode': 'hybrid_ai',
+            'ai_capabilities': ['energy_specialist', 'general_ai', 'hybrid_routing']
         })
 
     @app.errorhandler(404)
@@ -332,27 +351,251 @@ else:
             'status': 500
         }), 500
 
+    class GeminiAI:
+        """Gemini AI integration for general questions"""
+        
+        def __init__(self):
+            self.api_key = os.getenv('GEMINI_API_KEY', 'AIzaSyAqib60Hqzz36ygA5cv4QRl8y6CKO9spLs')
+            self.model_name = 'gemini-1.5-flash'
+            
+        def get_gemini_response(self, user_input: str) -> str:
+            """Get response from Gemini API for general questions"""
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+                
+                headers = {
+                    'Content-Type': 'application/json',
+                }
+                
+                data = {
+                    "contents": [{
+                        "parts": [{
+                            "text": f"You are a helpful, knowledgeable, and friendly AI assistant. Provide detailed, informative, and engaging responses. Be thorough in your explanations while remaining conversational and easy to understand. Note: If the question is about energy management, power systems, electrical monitoring, or similar technical topics, mention that you can provide general information but suggest the user ask the EMS specialist for detailed technical analysis. User question: {user_input}"
+                        }]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 800,
+                        "topP": 0.8,
+                        "topK": 40
+                    }
+                }
+                
+                response = requests.post(url, headers=headers, json=data, timeout=15)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if 'candidates' in result and len(result['candidates']) > 0:
+                        text = result['candidates'][0]['content']['parts'][0]['text']
+                        return f"🤖 **General AI Response:**\n\n{text.strip()}\n\n💡 *For detailed energy system analysis, feel free to ask about power consumption, anomalies, costs, or system status!*"
+                    else:
+                        return "🤖 I received an empty response. Please try again."
+                else:
+                    logging.warning(f"Gemini API error: {response.status_code}")
+                    return "🤖 I'm having trouble connecting to my general knowledge base right now. Let me help you with energy management questions instead! Try asking about power consumption, system status, or energy costs."
+            
+            except Exception as e:
+                logging.error(f"Gemini API error: {e}")
+                return "🤖 I'm having trouble with general questions right now, but I'm excellent at energy management! Ask me about power consumption, anomalies, energy costs, or system analysis."
+
+    class HybridQueryRouter:
+        """Routes questions between EMS specialist and general AI"""
+        
+        def __init__(self):
+            self.gemini_ai = GeminiAI()
+            
+            # Keywords that indicate energy/EMS related questions
+            self.ems_keywords = [
+                # Energy terms
+                'energy', 'power', 'electricity', 'electrical', 'watt', 'kilowatt', 'kwh', 'consumption',
+                'usage', 'load', 'demand', 'grid', 'meter', 'reading', 'bill', 'cost', 'rate',
+                
+                # Electrical parameters
+                'voltage', 'current', 'ampere', 'amp', 'power factor', 'pf', 'frequency',
+                'phase', 'reactive', 'apparent', 'kva', 'kvar', 'thd',
+                
+                # System terms
+                'ems', 'system', 'status', 'health', 'operational', 'running', 'working',
+                'anomaly', 'anomalies', 'spike', 'fluctuation', 'abnormal', 'alert',
+                
+                # Analysis terms
+                'trend', 'pattern', 'analysis', 'report', 'summary', 'statistics',
+                'average', 'maximum', 'minimum', 'peak', 'efficiency', 'optimization',
+                
+                # Equipment terms
+                'equipment', 'device', 'sensor', 'hardware', 'monitor', 'monitoring',
+                'scada', 'plc', 'inverter', 'transformer', 'generator', 'motor',
+                
+                # Time-based terms in energy context
+                'today', 'daily', 'hourly', 'monthly', 'real-time', 'latest', 'current',
+                'historical', 'forecast', 'prediction'
+            ]
+            
+            # General terms that are NOT energy-related
+            self.general_keywords = [
+                'weather', 'news', 'sports', 'movie', 'music', 'recipe', 'cooking',
+                'travel', 'hotel', 'restaurant', 'joke', 'story', 'game', 'book',
+                'health', 'medicine', 'doctor', 'exercise', 'fitness', 'diet',
+                'fashion', 'shopping', 'car', 'transportation', 'politics',
+                'history', 'geography', 'science', 'math', 'programming', 'computer',
+                'phone', 'app', 'social media', 'facebook', 'twitter', 'instagram'
+            ]
+        
+        def is_energy_related(self, question: str) -> bool:
+            """Determine if question is energy/EMS related"""
+            question_lower = question.lower()
+            
+            # Strong indicators for EMS questions
+            ems_score = 0
+            general_score = 0
+            
+            # Count EMS-related keywords
+            for keyword in self.ems_keywords:
+                if keyword in question_lower:
+                    ems_score += 1
+            
+            # Count general keywords
+            for keyword in self.general_keywords:
+                if keyword in question_lower:
+                    general_score += 1
+            
+            # Special patterns that are definitely EMS-related
+            ems_patterns = [
+                r'(what.*consumption|how much.*energy|power.*usage)',
+                r'(system.*status|health.*check|operational)',
+                r'(anomal|spike|fluctuat|abnormal)',
+                r'(voltage|current|power factor)',
+                r'(energy.*cost|power.*bill|electricity.*rate)',
+                r'(ems|energy management|power monitor)',
+                r'(latest.*reading|current.*data|real.?time)'
+            ]
+            
+            for pattern in ems_patterns:
+                if re.search(pattern, question_lower):
+                    ems_score += 3
+            
+            # If it's a greeting, route to EMS for energy-focused greeting
+            greeting_patterns = [
+                r'^(hi|hello|hey|good morning|good afternoon|good evening)',
+                r'^(how are you|what\'s up|how\'s it going)'
+            ]
+            
+            for pattern in greeting_patterns:
+                if re.search(pattern, question_lower):
+                    return True  # Let EMS handle greetings with energy context
+            
+            # Decision logic
+            if ems_score > general_score and ems_score > 0:
+                return True
+            elif general_score > ems_score:
+                return False
+            else:
+                # If unclear and no specific EMS keywords, default to general AI
+                return ems_score > 0
+    
+        def route_question(self, question: str, query_engine=None) -> Dict[str, Any]:
+            """Route question to appropriate AI and return response"""
+            start_time = datetime.now()
+            
+            is_ems = self.is_energy_related(question)
+            
+            logging.info(f"Question routing: {'EMS' if is_ems else 'General'} - '{question[:50]}...'")
+            
+            if is_ems:
+                # Use EMS specialist
+                try:
+                    if query_engine:
+                        ems_response = query_engine.search(question)
+                        response_text = ems_response.get('answer', 'EMS system processing your energy-related question...')
+                    else:
+                        response_text = "EMS system not initialized. Please ensure MongoDB connection is established."
+                    
+                    return {
+                        'success': True,
+                        'response': f"⚡ **EMS Specialist Response:**\n\n{response_text}",
+                        'ai_type': 'EMS_Specialist',
+                        'routing_decision': 'energy_related',
+                        'query': question,
+                        'timestamp': datetime.now().isoformat(),
+                        'processing_time': (datetime.now() - start_time).total_seconds()
+                    }
+                except Exception as e:
+                    logging.error(f"EMS processing error: {e}")
+                    # Fallback to general AI if EMS fails
+                    general_response = self.gemini_ai.get_gemini_response(question)
+                    return {
+                        'success': True,
+                        'response': f"⚠️ EMS specialist temporarily unavailable. Here's a general response:\n\n{general_response}",
+                        'ai_type': 'General_Fallback',
+                        'routing_decision': 'ems_failed',
+                        'query': question,
+                        'timestamp': datetime.now().isoformat(),
+                        'processing_time': (datetime.now() - start_time).total_seconds()
+                    }
+            else:
+                # Use general AI
+                try:
+                    general_response = self.gemini_ai.get_gemini_response(question)
+                    return {
+                        'success': True,
+                        'response': general_response,
+                        'ai_type': 'General_AI',
+                        'routing_decision': 'general_question',
+                        'query': question,
+                        'timestamp': datetime.now().isoformat(),
+                        'processing_time': (datetime.now() - start_time).total_seconds()
+                    }
+                except Exception as e:
+                    logging.error(f"General AI error: {e}")
+                    # Fallback to EMS if general AI fails
+                    if query_engine:
+                        ems_response = query_engine.search(question)
+                        response_text = ems_response.get('answer', 'Processing your question...')
+                    else:
+                        response_text = "I'm having trouble with general questions right now. Please try asking about energy management topics."
+                    
+                    return {
+                        'success': True,
+                        'response': f"🔄 **Fallback Response:**\n\n{response_text}",
+                        'ai_type': 'EMS_Fallback',
+                        'routing_decision': 'general_failed',
+                        'query': question,
+                        'timestamp': datetime.now().isoformat(),
+                        'processing_time': (datetime.now() - start_time).total_seconds()
+                    }
+
     def main():
-        """Main entry point for legacy mode"""
+        """Main entry point for hybrid AI mode"""
         print("=" * 60)
-        print("🔋 EMS (Energy Management System) AI Agent")
+        print("🤖 EMS (Energy Management System) Hybrid AI Agent")
         print("=" * 60)
         print(f"🏛️  Database: {MONGODB_DATABASE}")
-        print("🌐 Starting Flask server (Legacy Mode)...")
+        print("🌐 Starting Flask server (Hybrid AI Mode)...")
+        print("🧠 AI Capabilities: Energy Specialist + General AI (Gemini)")
         print("💡 To use microservices mode, set MICROSERVICES_MODE=true")
         print("=" * 60)
         
         # Initialize EMS components
         if initialize_ems():
             print("✅ EMS components initialized successfully!")
+            print("🤖 Hybrid AI Router ready!")
             print("🚀 Server starting on http://localhost:5004")
             print("\n📊 Available endpoints:")
             print("   • GET  /              - Main dashboard")
-            print("   • POST /api/query     - Process EMS queries")
-            print("   • GET  /api/status    - System status")
+            print("   • POST /api/query     - Hybrid AI query processing")
+            print("   • GET  /api/status    - System status with AI info")
             print("   • POST /api/load_data - Load Excel data")
             print("   • GET  /api/data_summary - Data summary")
             print("   • GET  /health        - Health check")
+            print("\n🧠 AI Query Examples:")
+            print("   Energy Questions → EMS Specialist:")
+            print("   • 'What is the current power consumption?'")
+            print("   • 'Show me energy anomalies'")
+            print("   • 'Analyze voltage trends'")
+            print("   General Questions → Gemini AI:")
+            print("   • 'What's the weather like?'")
+            print("   • 'Explain machine learning'")
+            print("   • 'Tell me a joke'")
             print("=" * 60)
             
             # Run the Flask app
