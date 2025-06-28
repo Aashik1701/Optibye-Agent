@@ -35,7 +35,7 @@ class RedisConfig:
 class ServiceRegistryConfig:
     """Service registry configuration"""
     host: str = "localhost"
-    port: int
+    port: int = 6379
     health_check_interval: int = 30
 
 
