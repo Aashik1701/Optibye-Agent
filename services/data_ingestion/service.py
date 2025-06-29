@@ -142,21 +142,27 @@ class DataIngestionService(BaseService):
     async def _create_indexes(self):
         """Create database indexes for performance"""
         try:
+            if not self.collections:
+                logger.warning("Collections not initialized, skipping index creation")
+                return
+                
             # Create indexes on commonly queried fields
-            await asyncio.to_thread(
-                self.collections['raw_data'].create_index,
-                [("timestamp", 1), ("equipment_id", 1)]
-            )
-            await asyncio.to_thread(
-                self.collections['raw_data'].create_index,
-                [("equipment_id", 1)]
-            )
-            await asyncio.to_thread(
-                self.collections['processed_data'].create_index,
-                [("timestamp", 1), ("equipment_id", 1)]
-            )
+            for collection_name, collection in self.collections.items():
+                if collection_name in ['raw_data', 'processed_data']:
+                    try:
+                        await asyncio.to_thread(
+                            collection.create_index,
+                            [("timestamp", 1), ("equipment_id", 1)]
+                        )
+                        await asyncio.to_thread(
+                            collection.create_index,
+                            [("equipment_id", 1)]
+                        )
+                        logger.info(f"Created indexes for {collection_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not create indexes for {collection_name}: {e}")
             
-            logger.info("Database indexes created successfully")
+            logger.info("Database indexes setup completed")
             
         except Exception as e:
             logger.error(f"Error creating indexes: {e}")

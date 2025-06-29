@@ -408,14 +408,29 @@ class QueryProcessorService(BaseService):
             "recent_data": recent_data,
             "count": len(recent_data)
         }
+    
+    async def process_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process query requests"""
+        try:
+            query = request_data.get('query', '')
+            if not query:
+                return {"error": "Query is required"}
+            
+            # Process the query
+            result = await self.process_query(query)
+            return {"success": True, "result": result}
+            
+        except Exception as e:
+            logger.error(f"Error processing request: {e}")
+            return {"error": str(e)}
 
 
 # FastAPI app
 def create_query_processor_service():
     """Create and configure the query processor service"""
     
-    config_manager = ConfigManager()
-    config = config_manager.get_service_config('query_processor')
+    config_manager = ConfigManager('query_processor')
+    config = config_manager.get_all_config()
     
     service = QueryProcessorService(config)
     app = FastAPI(
@@ -484,4 +499,4 @@ def create_query_processor_service():
 
 if __name__ == "__main__":
     app = create_query_processor_service()
-    uvicorn.run(app, host="0.0.0.0", port=8003)
+    uvicorn.run(app, host="0.0.0.0", port=8006)

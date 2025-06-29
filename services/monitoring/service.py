@@ -997,8 +997,8 @@ def create_monitoring_service(config: Dict[str, Any] = None) -> MonitoringServic
     """Factory function to create monitoring service"""
     if config is None:
         from common.config_manager import ConfigManager
-        config_manager = ConfigManager()
-        config = config_manager.get_service_config("monitoring")
+        config_manager = ConfigManager("monitoring")
+        config = config_manager.get_all_config()
     
     return MonitoringService(config)
 
